@@ -1,4 +1,17 @@
 {
   "name": "migu_video",
   "type": "module"
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "http": "^0.0.1-security",
+    "url": "^0.11.0"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
 }
