@@ -1,5 +1,5 @@
 # Worker 的名称，你可以自定义
-name = "migu-video"
+name = "migu"
 
 # 项目的入口文件，对应你修改后的 app.js
 main = "app.js"
