@@ -1,8 +1,34 @@
+# Worker 的名称，你可以自定义
 name = "migu-video"
+
+# 项目的入口文件，对应你修改后的 app.js
 main = "app.js"
+
+# 兼容性日期，建议保持较新
 compatibility_date = "2024-04-01"
+
+# 必须开启 Node.js 兼容模式，因为项目使用了 node:http 和其他 Node 原生模块
 compatibility_flags = [ "nodejs_compat" ]
 
+# 环境变量配置 (对应项目中的 config.js 逻辑)
 [vars]
-mport = "8787"
+# 咪咕视频画质: 1-标清, 2-高清, 3-超清
 mrateType = "3"
+
+# 访问密码 (如果不需要可以留空 "")
+mpass = ""
+
+# 自动更新间隔 (小时)
+# 注意：在 Workers 环境中，由于没有持久化进程，此参数主要用于初次加载
+mupdateInterval = "1"
+
+# 你的域名 (部署后填入 Cloudflare 分配的 *.workers.dev 地址，或你的自定义域名)
+mhost = ""
+
+# ---------------------------------------------------------
+# 重要：咪咕账号信息
+# 建议在 Cloudflare 控制台的 "Settings" -> "Variables" 中手动添加，更安全。
+# 如果直接写在这里，请确保你的 GitHub 仓库是私有的。
+# ---------------------------------------------------------
+muserId = "你的咪咕用户ID"
+mtoken = "你的咪咕Token"
