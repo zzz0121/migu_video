@@ -2,136 +2,122 @@ import http from "node:http"
 import { host, pass, port, programInfoUpdateInterval, token, userId } from "./config.js";
 import { getDateTimeStr } from "./utils/time.js";
 import update from "./utils/updateData.js";
-import { printBlue, printGreen, printMagenta, printRed } from "./utils/colorOut.js";
+// 屏蔽掉可能导致崩溃的控制台彩色输出（部分 Worker 环境不支持 stdout 样式）
+// import { printBlue, printGreen, printMagenta, printRed } from "./utils/colorOut.js"; 
 import { delay } from "./utils/fetchList.js";
 import { channel, interfaceStr } from "./utils/appUtils.js";
 
-// 记录是否已经初始化过（Worker 在同一个实例中可能会复用变量）
 let initialized = false;
-let loading = false;
 
-// 核心逻辑函数：提取自原 http.createServer
+// 核心逻辑函数
 async function handleRequest(req, res) {
-    while (loading) {
-        await delay(50)
-    }
-    loading = true;
-
     let { method, url, headers } = req;
 
-    // --- 身份认证逻辑 ---
+    // 身份认证逻辑简写（保持原逻辑）
     if (pass != "") {
         const urlSplit = url.split("/")
         if (urlSplit[1] != pass) {
             res.writeHead(200, { 'Content-Type': 'application/json;charset=UTF-8' });
             res.end(`身份认证失败`);
-            loading = false;
             return;
         } else {
-            if (urlSplit.length > 3) {
-                url = url.substring(pass.length + 1)
-            } else {
-                url = urlSplit.length == 2 ? "/" : "/" + urlSplit[urlSplit.length - 1]
-            }
+            url = urlSplit.length > 3 ? url.substring(pass.length + 1) : (urlSplit.length == 2 ? "/" : "/" + urlSplit[urlSplit.length - 1]);
         }
     }
 
-    let urlToken = ""
-    let urlUserId = ""
+    let urlToken = token;
+    let urlUserId = userId;
     if (/\/{1}[^\/\s]{1,}\/{1}[^\/\s]{1,}/.test(url)) {
-        const urlSplit = url.split("/")
+        const urlSplit = url.split("/");
         if (urlSplit.length >= 3) {
-            urlUserId = urlSplit[1]
-            urlToken = urlSplit[2]
-            url = urlSplit.length == 3 ? "/" : "/" + urlSplit[urlSplit.length - 1]
+            urlUserId = urlSplit[1];
+            urlToken = urlSplit[2];
+            url = urlSplit.length == 3 ? "/" : "/" + urlSplit[urlSplit.length - 1];
         }
-    } else {
-        urlUserId = userId
-        urlToken = token
     }
 
     if (method === "HEAD") {
         res.writeHead(200, { "Content-Type": "application/json;charset=UTF-8" });
         res.end();
-        loading = false;
         return;
     }
 
-    if (method != "GET") {
-        res.writeHead(200, { 'Content-Type': 'application/json;charset=UTF-8' });
-        res.end(JSON.stringify({ data: '请使用GET请求' }));
-        loading = false;
-        return;
-    }
-
-    const interfaceList = "/,/interface.txt,/m3u,/txt,/playback.xml,/main.m3u"
-    if (interfaceList.indexOf(url) !== -1) {
-        const interfaceObj = interfaceStr(url, headers, urlUserId, urlToken)
-        res.setHeader('Content-Type', interfaceObj.contentType);
-        if (url == "/m3u") {
-            res.setHeader('content-disposition', "inline; filename=\"interface.m3u\"");
-        }
+    // 接口路径匹配
+    const interfaceList = ["/", "/interface.txt", "/m3u", "/txt", "/playback.xml", "/main.m3u"];
+    if (interfaceList.includes(url)) {
+        const interfaceObj = interfaceStr(url, headers, urlUserId, urlToken);
+        res.setHeader('Content-Type', interfaceObj.contentType || "text/plain");
+        if (url == "/m3u") res.setHeader('content-disposition', "inline; filename=\"interface.m3u\"");
         res.statusCode = 200;
-        res.end(interfaceObj.content || "获取失败");
-        loading = false;
+        res.end(interfaceObj.content || "数据获取失败，请检查Token");
         return;
     }
 
-    const result = await channel(url, urlUserId, urlToken)
-    if (result.code != 302) {
-        res.writeHead(result.code, { 'Content-Type': 'application/json;charset=UTF-8' });
-        res.end(result.desc)
-    } else {
-        res.writeHead(result.code, {
-            'Content-Type': 'application/json;charset=UTF-8',
-            location: result.playURL
-        });
-        res.end()
+    // 频道解析
+    try {
+        const result = await channel(url, urlUserId, urlToken);
+        if (result.code != 302) {
+            res.writeHead(result.code || 500, { 'Content-Type': 'application/json;charset=UTF-8' });
+            res.end(result.desc || "解析失败");
+        } else {
+            res.writeHead(result.code, { 'Location': result.playURL });
+            res.end();
+        }
+    } catch (e) {
+        res.writeHead(500);
+        res.end("Channel Error: " + e.message);
     }
-    loading = false;
 }
 
-// --- Cloudflare Worker 适配层 ---
 export default {
     async fetch(request, env, ctx) {
-        // 1. 初始化数据（Worker 启动时运行一次）
-        if (!initialized) {
-            console.log("正在执行初次数据更新...");
-            await update(0);
-            initialized = true;
-        }
+        // --- 关键修复 1: 注入全局变量，让 config.js 能够读到 env 里的变量 ---
+        globalThis.process = { env: env };
 
-        // 2. 模拟 Node.js 的 req 和 res 对象
-        const urlObj = new URL(request.url);
-        const nodeReq = {
-            method: request.method,
-            url: urlObj.pathname + urlObj.search,
-            headers: Object.fromEntries(request.headers)
-        };
-
-        let responseBody = "";
-        let responseStatus = 200;
-        let responseHeaders = {};
-
-        const nodeRes = {
-            statusCode: 200,
-            setHeader(k, v) { responseHeaders[k.toLowerCase()] = v; },
-            writeHead(status, headers) {
-                responseStatus = status;
-                if (headers) Object.assign(responseHeaders, headers);
-            },
-            end(data) {
-                if (data) responseBody = data;
+        try {
+            // --- 关键修复 2: 防止初始化失败导致整个 Worker 崩溃 ---
+            if (!initialized) {
+                console.log("正在初始化咪咕列表...");
+                await update(0).catch(e => console.error("初始更新失败 (可能是IP受限):", e));
+                initialized = true;
             }
-        };
 
-        // 3. 执行原业务逻辑
-        await handleRequest(nodeReq, nodeRes);
+            const urlObj = new URL(request.url);
+            const nodeReq = {
+                method: request.method,
+                url: urlObj.pathname + urlObj.search,
+                headers: Object.fromEntries(request.headers)
+            };
 
-        // 4. 将结果转回 Worker Response
-        return new Response(responseBody, {
-            status: responseStatus,
-            headers: responseHeaders
-        });
+            let responseBody = "";
+            let responseStatus = 200;
+            let responseHeaders = {};
+
+            const nodeRes = {
+                statusCode: 200,
+                setHeader(k, v) { responseHeaders[k.toLowerCase()] = v; },
+                writeHead(status, headers) {
+                    responseStatus = status;
+                    if (headers) Object.assign(responseHeaders, headers);
+                },
+                end(data) { if (data) responseBody = data; }
+            };
+
+            await handleRequest(nodeReq, nodeRes);
+
+            // 如果是 302 重定向，Worker 需要特殊处理
+            if (responseStatus === 302 && responseHeaders.location) {
+                return Response.redirect(responseHeaders.location, 302);
+            }
+
+            return new Response(responseBody, {
+                status: responseStatus,
+                headers: responseHeaders
+            });
+
+        } catch (err) {
+            // 捕获所有错误并返回文字，而不是显示 1101 错误页面
+            return new Response("Worker Internal Error: " + err.message + "\n" + err.stack, { status: 500 });
+        }
     }
 };
