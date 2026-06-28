@@ -5,7 +5,7 @@ name = "migu"
 main = "app.js"
 
 # 兼容性日期，建议保持较新
-compatibility_date = "2024-04-01"
+compatibility_date = "2025-01-01"
 
 # 必须开启 Node.js 兼容模式，因为项目使用了 node:http 和其他 Node 原生模块
 compatibility_flags = [ "nodejs_compat" ]
